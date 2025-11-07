@@ -1,4 +1,5 @@
 from json_dict_processing import create_processor
+from typing import Callable
 
 
 CONFIG_PRIZE = {
@@ -10,7 +11,7 @@ CONFIG_PRIZE = {
 }
 
 
-def prize_processor():
+def prize_processor() -> Callable:
     """
     Функция создает парсер по CONFIG_PRIZE
 

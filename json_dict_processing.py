@@ -1,70 +1,88 @@
-def convert_config_to_pattern(config):
+from typing import Any, Callable
+
+
+def find_value_extracting(row: dict,
+                          path_list: list) -> Any:
     """
-    Преобразует тип данных CONFIG во внутренний тип данных
-
-    Args:
-        config (dict): Паттерн конфига
-
-    Returns:
-        dict: Переделанный паттерн
-    """
-    result_pattern = {}
-    for key, item in config.items():
-        if isinstance(item, list):
-            result_pattern[key] = {'path': '.'.join(item)}
-        elif isinstance(item, str):
-            result_pattern[key] = {'path': item}
-        elif isinstance(item[0], list):
-            result_pattern[key] = {'path': '.'.join(item[0]),
-                                   'transform': item[1]}
-        else:
-            result_pattern[key] = {'path': item[0], 'transform': item[1]}
-    return result_pattern
-
-
-def extract_nested_value(row, pattern):
-    """
-    Парсит словарь согласно приведенному паттерну
+    Используется для последовательного перехода по
+    словарю согласно последовательности ключей
+    в списке.
 
     Args:
         row (dict): Словарь для парсинга
-        pattern (dict): Паттерн
+        path_list(list[str]): Последовательность путей
 
     Returns:
-        dict: Распарсенный словарь
+        Any: значение, которое лежало по концу пути, или None,
+             если путя не существует.
+
+    Raises:
+        ValueError: Если указаны неверные типы
+            передаваемых параметров.
     """
-    result_row = {}
-    for key, meta in pattern.items():
-        if 'path' in meta:
-            meta_path: list[str] = meta['path'].split('.')
-            if meta_path[0] in row:
-                needed_item = row[meta_path[0]]
-                for path_key in meta_path[1:]:
-                    if isinstance(needed_item, list):
-                        needed_item = needed_item[0]
-                    elif isinstance(needed_item, dict):
-                        if path_key in needed_item:
-                            needed_item = needed_item[path_key]
-                        else:
-                            needed_item = None
-                    else:
-                        needed_item = None
-                        break
-                if 'transform' in meta:
-                    if isinstance(needed_item, list):
-                        new_needed_item: list[int | dict[str, str | int]] = []
-                        for item in needed_item:
-                            new_needed_item.append(meta['transform'](item))
-                        needed_item = new_needed_item
-                    else:
-                        needed_item = meta['transform'](needed_item)
+    if not isinstance(row, dict):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+    if not isinstance(path_list, list):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+
+    sub_row = row
+    for path_el in path_list:
+        if path_el not in sub_row:
+            return None
+        else:
+            sub_row = sub_row[path_el]
+
+    return sub_row
+
+
+def extract_value_config(row: dict,
+                         config: dict) -> dict:
+    """
+    Создает новый словарь из данного
+    согласно конфигу заданного формата.
+
+    Args:
+        row (dict): Словарь для парсинга
+        path_list(list[str]): Последовательность путей
+
+    Returns:
+        dict: Словарь, соответствующий формату в конфиге
+
+    Raises:
+        ValueError: Если указаны неверные типы
+            передаваемых параметров.
+    """
+    if not isinstance(row, dict):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+    if not isinstance(config, dict):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+    result_dict = {}
+
+    for key in config:
+        if isinstance(config[key], tuple):
+            if isinstance(config[key][0], list):
+                ret_value = find_value_extracting(row, config[key][0])
+                if ret_value is None:
+                    result_dict[key] = None
+                else:
+                    result_dict[key] = config[key][1](ret_value)
             else:
-                needed_item = None
-            result_row[key] = needed_item
-    return result_row
+                if isinstance(row[config[key][0]], list):
+                    result_dict[key] = []
+                    for li_el in row[config[key][0]]:
+                        result_dict[key].append(config[key][1](li_el))
+                else:
+                    result_dict[key] = config[key][1](row[config[key][0]])
+        elif isinstance(config[key], list):
+            result_dict[key] = find_value_extracting(row, config[key])
+        else:
+            result_dict[key] = row[config[key]]
+
+    return result_dict
 
 
-def process_dictionary_with_config(dictionary, config):
+def process_dictionary_with_config(dictionary: dict,
+                                   config: dict) -> dict:
     """
     Парсит словарь согласно приведенному конфигу
 
@@ -74,13 +92,23 @@ def process_dictionary_with_config(dictionary, config):
 
     Returns:
         dict: Распарсенный словарь
+
+    Raises:
+        ValueError: Если указаны неверные типы
+            передаваемых параметров.
     """
-    pattern = convert_config_to_pattern(config)
-    result_row = extract_nested_value(dictionary, pattern)
+    if not isinstance(dictionary, dict):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+    if not isinstance(config, dict):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+
+    result_row = extract_value_config(dictionary, config)
+
     return result_row
 
 
-def process_list_of_dicts_with_config(list_of_dicts, config):
+def process_list_of_dicts_with_config(list_of_dicts: list,
+                                      config: dict) -> list:
     """
     Парсит список словарей согласно конфигу
 
@@ -89,17 +117,28 @@ def process_list_of_dicts_with_config(list_of_dicts, config):
         config (dict): конфиг
 
     Returns:
-        dict: Распарсенный словарь
+        list: Список словарей, таблица из словарей нового формата
+
+    Raises:
+        ValueError: Если указаны неверные типы
+            передаваемых параметров.
     """
+    if not isinstance(list_of_dicts, list):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+    if not isinstance(config, dict):
+        raise ValueError("Указан неверный тип данных для парсинга словаря")
+
     result_database = []
-    pattern = convert_config_to_pattern(config)
+
     for row in list_of_dicts:
-        result_row = extract_nested_value(row, pattern)
+        result_row = extract_value_config(row, config)
         result_database.append((result_row))
+
     return result_database
 
 
-def create_processor(config, list_processor: bool = False):
+def create_processor(config: dict,
+                     list_processor: bool = False) -> Callable:
     """
     Создает парсер по данному конфигу для list или dict в зависимости bool
 
@@ -109,11 +148,21 @@ def create_processor(config, list_processor: bool = False):
 
     Returns:
         Callable: парсер соответствующего запросу типа
+
+    Raises:
+        ValueError: Если указаны неверные типы
+            передаваемых параметров.
     """
+    if not isinstance(list_processor, bool):
+        raise ValueError("Указан неверный тип данных для создания процессора")
+    if not isinstance(config, dict):
+        raise ValueError("Указан неверный тип данных для создания процессора")
+
     if list_processor:
         def processor_with_list(list_of_dicts):
             return process_list_of_dicts_with_config(list_of_dicts, config)
         return processor_with_list
+
     else:
         def processor_with_dict(dictionary):
             return process_dictionary_with_config(dictionary, config)
